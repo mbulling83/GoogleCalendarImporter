@@ -1,5 +1,5 @@
-import { App, Plugin, PluginSettingTab, Setting, TFile, MarkdownView, moment } from 'obsidian';
-import { GoogleCalendarAPI, GoogleCalendarCredentials } from './googleCalendarAPI';
+import { App, Editor, Notice, Plugin, PluginSettingTab, Setting, TFile, MarkdownView, moment } from 'obsidian';
+import { GoogleCalendarAPI, GoogleCalendarCredentials, CalendarData } from './googleCalendarAPI';
 import { Credentials } from "google-auth-library";
 import { createCodeBlockProcessor } from './codeBlockProcessor';
 import { DateInputModal } from './dateInputModal';
@@ -10,6 +10,10 @@ interface GoogleCalendarImporterSettings {
 	googleClientSecret: string;
 	googleAccessToken: string;
 	googleRefreshToken: string;
+	eventFormat: string;
+	allDayFormat: string;
+	includeTasks: boolean;
+	taskFormat: string;
 }
 
 const DEFAULT_SETTINGS: GoogleCalendarImporterSettings = {
@@ -17,7 +21,11 @@ const DEFAULT_SETTINGS: GoogleCalendarImporterSettings = {
 	googleClientId: '',
 	googleClientSecret: '',
 	googleAccessToken: '',
-	googleRefreshToken: ''
+	googleRefreshToken: '',
+	eventFormat: '- {start} - {end}: {title}',
+	allDayFormat: '- All day: {title}',
+	includeTasks: false,
+	taskFormat: '- [ ] {title}',
 }
 
 export default class GoogleCalendarImporter extends Plugin {
@@ -46,6 +54,25 @@ export default class GoogleCalendarImporter extends Plugin {
 						const file = ctx.file;
 						new DateInputModal(this.app, (date: string) => {
 							this.insertCalendarBlock(file, date, true);
+						}).open();
+					}
+					return true;
+				}
+				return false;
+			}
+		});
+
+		this.addCommand({
+			id: 'insert-calendar-events-as-text',
+			name: 'Insert calendar events as text',
+			editorCheckCallback: (checking, editor, ctx) => {
+				if (ctx instanceof MarkdownView && ctx.file) {
+					if (!checking) {
+						const file = ctx.file;
+						const dateFromFile = this.extractDateFromFilename(file);
+						new DateInputModal(this.app, (date: string) => {
+							const targetDate = date || dateFromFile || moment().format('YYYY-MM-DD');
+							this.insertCalendarAsText(editor, targetDate);
 						}).open();
 					}
 					return true;
@@ -96,8 +123,12 @@ export default class GoogleCalendarImporter extends Plugin {
 
 	async handleGoogleAuth() {
 		if (!this.settings.googleClientId || !this.settings.googleClientSecret) {
+			new Notice('Please enter your Google Client ID and Client Secret first.');
 			return;
 		}
+
+		new Notice('Opening Google authorization page...');
+		this.initializeGoogleCalendarAPI();
 
 		try {
 			const tokens = await this.googleCalendarAPI.startOAuthFlow();
@@ -110,8 +141,13 @@ export default class GoogleCalendarImporter extends Plugin {
 					"google-calendar",
 					createCodeBlockProcessor(this.googleCalendarAPI)
 				);
+				new Notice('Google Calendar authorized successfully.');
+			} else {
+				new Notice('Authorization incomplete — no tokens received. Please try again.');
 			}
 		} catch (error) {
+			const message = error instanceof Error ? error.message : 'Unknown error';
+			new Notice(`Google Calendar authorization failed: ${message}`, 10000);
 			console.error('Error during OAuth flow:', error);
 		}
 	}
@@ -128,6 +164,77 @@ export default class GoogleCalendarImporter extends Plugin {
 	private extractDateFromFilename(file: TFile): string {
 		const dateMatch = file.basename.match(/\d{4}-\d{2}-\d{2}/);
 		return dateMatch ? dateMatch[0] : '';
+	}
+
+	private formatTime(dateTimeString: string): string {
+		const date = new Date(dateTimeString);
+		return date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
+	}
+
+	private formatTime12(dateTimeString: string): string {
+		const date = new Date(dateTimeString);
+		return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+	}
+
+	private applyFormat(template: string, vars: Record<string, string>): string {
+		return template.replace(/\{(\w+)\}/g, (_, key) => vars[key] ?? '');
+	}
+
+	private formatCalendarData(data: CalendarData): string {
+		const lines: string[] = [];
+
+		if (data.events?.items) {
+			for (const event of data.events.items) {
+				if (!event.summary) continue;
+
+				const isAllDay = event.start?.date && !event.start?.dateTime;
+				if (isAllDay) {
+					lines.push(this.applyFormat(this.settings.allDayFormat, {
+						title: event.summary,
+					}));
+				} else if (event.start?.dateTime && event.end?.dateTime) {
+					lines.push(this.applyFormat(this.settings.eventFormat, {
+						title: event.summary,
+						start: this.formatTime(event.start.dateTime),
+						end: this.formatTime(event.end.dateTime),
+						start12: this.formatTime12(event.start.dateTime),
+						end12: this.formatTime12(event.end.dateTime),
+					}));
+				}
+			}
+		}
+
+		if (this.settings.includeTasks && data.tasks?.items) {
+			for (const task of data.tasks.items) {
+				if (!task.title) continue;
+				lines.push(this.applyFormat(this.settings.taskFormat, {
+					title: task.title,
+				}));
+			}
+		}
+
+		return lines.join('\n');
+	}
+
+	async insertCalendarAsText(editor: Editor, date: string) {
+		new Notice(`Fetching calendar for ${date}...`);
+		try {
+			const data = await this.googleCalendarAPI.getEventsAndTasksForDate(date);
+			if (!data) {
+				new Notice('Failed to fetch calendar data. Check your credentials.');
+				return;
+			}
+			const text = this.formatCalendarData(data);
+			if (!text) {
+				new Notice(`No events found for ${date}.`);
+				return;
+			}
+			const cursor = editor.getCursor();
+			editor.replaceRange(text + '\n', cursor);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : 'Unknown error';
+			new Notice(`Failed to fetch calendar: ${message}`, 10000);
+		}
 	}
 
 	async insertCalendarBlock(file: TFile, customDate?: string, isFromCommand?: boolean) {
@@ -185,6 +292,51 @@ class GoogleCalendarSettingTab extends PluginSettingTab {
 				.setValue(this.plugin.settings.enabledForDailyNotes)
 				.onChange(async (value) => {
 					this.plugin.settings.enabledForDailyNotes = value;
+					await this.plugin.saveSettings();
+				}));
+
+		containerEl.createEl('h3', {text: 'Event format'});
+
+		new Setting(containerEl)
+			.setName('Timed event format')
+			.setDesc('Template for timed events. Variables: {start}, {end}, {start12}, {end12}, {title}')
+			.addText(text => text
+				.setPlaceholder('- {start} - {end}: {title}')
+				.setValue(this.plugin.settings.eventFormat)
+				.onChange(async (value) => {
+					this.plugin.settings.eventFormat = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('All-day event format')
+			.setDesc('Template for all-day events. Variables: {title}')
+			.addText(text => text
+				.setPlaceholder('- All day: {title}')
+				.setValue(this.plugin.settings.allDayFormat)
+				.onChange(async (value) => {
+					this.plugin.settings.allDayFormat = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Include tasks')
+			.setDesc('Include Google Tasks in the text output')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.includeTasks)
+				.onChange(async (value) => {
+					this.plugin.settings.includeTasks = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Task format')
+			.setDesc('Template for tasks. Variables: {title}')
+			.addText(text => text
+				.setPlaceholder('- [ ] {title}')
+				.setValue(this.plugin.settings.taskFormat)
+				.onChange(async (value) => {
+					this.plugin.settings.taskFormat = value;
 					await this.plugin.saveSettings();
 				}));
 

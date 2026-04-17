@@ -9,7 +9,10 @@ export interface OAuthCredentials {
 
 export class OAuthServer {
 	private server: http.Server | null = null;
-	private port = 8080;
+	private port = 0;
+	private timeout: ReturnType<typeof setTimeout> | null = null;
+	private static readonly PORTS_TO_TRY = [8080, 8090, 8091, 9090];
+	private static readonly TIMEOUT_MS = 120_000;
 
 	private createOAuth2Client(credentials: OAuthCredentials) {
 		return new google.auth.OAuth2(
@@ -20,11 +23,54 @@ export class OAuthServer {
 	}
 
 	async startOAuthFlow(credentials: OAuthCredentials): Promise<Credentials> {
+		this.port = await this.findAvailablePort();
+
 		return new Promise((resolve, reject) => {
-			this.server = this.createServer(credentials, resolve, reject);
-			this.startServer(credentials);
+			this.timeout = setTimeout(() => {
+				this.closeServer();
+				reject(new Error("Authorization timed out — no response received within 2 minutes. Please try again."));
+			}, OAuthServer.TIMEOUT_MS);
+
+			const wrappedResolve = (tokens: Credentials) => {
+				this.clearTimeout();
+				resolve(tokens);
+			};
+			const wrappedReject = (reason?: Error) => {
+				this.clearTimeout();
+				reject(reason);
+			};
+
+			this.server = this.createServer(credentials, wrappedResolve, wrappedReject);
+			this.startServer(credentials, wrappedReject);
 		});
 	}
+
+	private findAvailablePort(): Promise<number> {
+		return new Promise((resolve, reject) => {
+			const tryPort = (index: number) => {
+				if (index >= OAuthServer.PORTS_TO_TRY.length) {
+					reject(new Error(`Could not bind to any port (tried ${OAuthServer.PORTS_TO_TRY.join(", ")}). Close conflicting services and try again.`));
+					return;
+				}
+				const port = OAuthServer.PORTS_TO_TRY[index];
+				const testServer = http.createServer();
+				testServer.once("error", () => tryPort(index + 1));
+				testServer.once("listening", () => {
+					testServer.close(() => resolve(port));
+				});
+				testServer.listen(port);
+			};
+			tryPort(0);
+		});
+	}
+
+	private clearTimeout(): void {
+		if (this.timeout) {
+			clearTimeout(this.timeout);
+			this.timeout = null;
+		}
+	}
+
 	private createServer(
 		credentials: OAuthCredentials,
 		resolve: (tokens: Credentials) => void,
@@ -93,7 +139,7 @@ export class OAuthServer {
 		`);
 	}
 
-	private startServer(credentials: OAuthCredentials): void {
+	private startServer(credentials: OAuthCredentials, reject: (reason?: Error) => void): void {
 		this.server?.listen(this.port, () => {
 			const authUrl = this.generateAuthUrl(credentials);
 			window.open(authUrl, "_blank");
@@ -101,7 +147,7 @@ export class OAuthServer {
 
 		this.server?.on("error", (err) => {
 			this.closeServer();
-			throw err;
+			reject(new Error(`OAuth server failed to start on port ${this.port}: ${err.message}`));
 		});
 	}
 
@@ -137,6 +183,7 @@ export class OAuthServer {
 	}
 
 	cleanup(): void {
+		this.clearTimeout();
 		this.closeServer();
 	}
 }
