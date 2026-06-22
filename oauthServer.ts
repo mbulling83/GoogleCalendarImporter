@@ -156,7 +156,6 @@ export class OAuthServer {
 
 		const scopes = [
 			"https://www.googleapis.com/auth/calendar.readonly",
-			"https://www.googleapis.com/auth/tasks.readonly",
 		];
 
 		return auth.generateAuthUrl({

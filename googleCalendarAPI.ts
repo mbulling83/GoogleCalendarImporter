@@ -1,6 +1,29 @@
-import { calendar_v3, google, tasks_v1 } from "googleapis";
+import { calendar_v3, google } from "googleapis";
 import { OAuthServer, OAuthCredentials } from "./oauthServer";
 import { Credentials } from "google-auth-library";
+
+export class AuthenticationError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = 'AuthenticationError';
+	}
+}
+
+function isAuthError(error: unknown): boolean {
+	if (error instanceof Error) {
+		const msg = error.message.toLowerCase();
+		if (
+			msg.includes('invalid_grant') ||
+			msg.includes('invalid credentials') ||
+			msg.includes('token has been expired') ||
+			msg.includes('unauthorized') ||
+			msg.includes('unauthenticated')
+		) return true;
+	}
+	const status = (error as any)?.response?.status ?? (error as any)?.code;
+	return status === 401 || status === 403;
+}
+
 export interface GoogleCalendarCredentials {
 	clientId: string;
 	clientSecret: string;
@@ -10,13 +33,11 @@ export interface GoogleCalendarCredentials {
 
 export interface CalendarData {
 	events: calendar_v3.Schema$Events | null;
-	tasks: tasks_v1.Schema$Tasks | null;
 }
 
 export class GoogleCalendarAPI {
 	private credentials: GoogleCalendarCredentials;
 	private calendar: calendar_v3.Calendar;
-	private tasks: tasks_v1.Tasks;
 	private oauthServer: OAuthServer;
 	private onTokensUpdated?: (tokens: Credentials) => void;
 
@@ -57,7 +78,6 @@ export class GoogleCalendarAPI {
 		}
 
 		this.calendar = google.calendar({ version: "v3", auth });
-		this.tasks = google.tasks({ version: "v1", auth });
 	}
 
 	async getEventsForDate(
@@ -86,74 +106,20 @@ export class GoogleCalendarAPI {
 
 			return response.data;
 		} catch (error) {
+			if (isAuthError(error)) {
+				throw new AuthenticationError('Google Calendar authorization has expired. Please re-authorize in plugin settings.');
+			}
 			console.error("Error fetching calendar events:", error);
 			return null;
 		}
 	}
 
-	async getTasksForDate(date: string): Promise<tasks_v1.Schema$Tasks | null> {
+	async getCalendarDataForDate(date: string): Promise<CalendarData | null> {
 		try {
-			if (!this.credentials.clientId || !this.credentials.clientSecret) {
-				throw new Error(
-					"Google Calendar API credentials not configured"
-				);
-			}
-			const taskListsResponse = await this.tasks.tasklists.list();
-			const taskLists = taskListsResponse.data.items || [];
-			
-			const targetDate = new Date(date);
-			targetDate.setHours(23, 59, 59, 999); 
-
-			const oneYearAgo = new Date(targetDate);
-			oneYearAgo.setDate(oneYearAgo.getDate() - 365);
-			
-			const taskPromises = taskLists.map(async (taskList) => {
-				if (!taskList.id) return [];
-				try {
-					const response = await this.tasks.tasks.list({
-						tasklist: taskList.id,
-						showCompleted: false, 
-						maxResults: 100,
-					});
-					const tasks = response.data.items || [];
-					const filteredTasks = tasks.filter(task => {
-						if (!task.due) return true;
-						const taskDueDate = new Date(task.due);
-						return taskDueDate >= oneYearAgo && taskDueDate <= targetDate; // align with google calendar behavior
-					});
-					return filteredTasks;
-				} catch (error) {
-					console.error(
-						`Error fetching tasks from list ${taskList.title}:`,
-						error
-					);
-					return [];
-				}
-			});
-			const taskResults = await Promise.all(taskPromises);
-			const allTasks = taskResults.flat();
-			return {
-				kind: "tasks#tasks",
-				items: allTasks,
-			};
+			const events = await this.getEventsForDate(date);
+			return { events };
 		} catch (error) {
-			console.error("Error fetching tasks:", error);
-			return null;
-		}
-	}
-
-	async getEventsAndTasksForDate(date: string): Promise<CalendarData | null> {
-		try {
-			const [events, tasks] = await Promise.all([
-				this.getEventsForDate(date),
-				this.getTasksForDate(date),
-			]);
-
-			return {
-				events: events,
-				tasks: tasks,
-			};
-		} catch (error) {
+			if (error instanceof AuthenticationError) throw error;
 			return null;
 		}
 	}
