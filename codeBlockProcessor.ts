@@ -3,12 +3,12 @@ import type { GoogleCalendarAPI } from './googleCalendarAPI';
 import { parseQuery } from './Injector/Parser';
 // @ts-ignore
 import CalendarDisplay from './ui/CalendarDisplay.svelte';
-// @ts-ignore  
+// @ts-ignore
 import ErrorDisplay from './ui/ErrorDisplay.svelte';
 
-export function createCodeBlockProcessor(api: GoogleCalendarAPI) {
+export function createCodeBlockProcessor(getApi: () => GoogleCalendarAPI) {
   return (source: string, el: HTMLElement, ctx: MarkdownPostProcessorContext) => {
-    const child = new CalendarCodeBlock(el, source, api);
+    const child = new CalendarCodeBlock(el, source, getApi);
     ctx.addChild(child);
   };
 }
@@ -16,22 +16,22 @@ export function createCodeBlockProcessor(api: GoogleCalendarAPI) {
 class CalendarCodeBlock extends MarkdownRenderChild {
   private component: any;
   private source: string;
-  private api: GoogleCalendarAPI;
+  private getApi: () => GoogleCalendarAPI;
 
-  constructor(containerEl: HTMLElement, source: string, api: GoogleCalendarAPI) {
+  constructor(containerEl: HTMLElement, source: string, getApi: () => GoogleCalendarAPI) {
     super(containerEl);
     this.source = source;
-    this.api = api;
+    this.getApi = getApi;
   }
 
   onload() {
     try {
       const query = parseQuery(this.source);
-      
+
       this.component = new CalendarDisplay({
         target: this.containerEl,
         props: {
-          api: this.api,
+          getApi: this.getApi,
           query: query,
         },
       });

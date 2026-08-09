@@ -1,31 +1,20 @@
 import { App, Editor, Notice, Plugin, PluginSettingTab, Setting, TFile, MarkdownView, moment } from 'obsidian';
 import { GoogleCalendarAPI, GoogleCalendarCredentials, CalendarData } from './googleCalendarAPI';
-import { Credentials } from "google-auth-library";
 import { createCodeBlockProcessor } from './codeBlockProcessor';
 import { DateInputModal } from './dateInputModal';
 
 interface GoogleCalendarImporterSettings {
 	enabledForDailyNotes: boolean;
-	googleClientId: string;
-	googleClientSecret: string;
-	googleAccessToken: string;
-	googleRefreshToken: string;
+	icsUrl: string;
 	eventFormat: string;
 	allDayFormat: string;
-	includeTasks: boolean;
-	taskFormat: string;
 }
 
 const DEFAULT_SETTINGS: GoogleCalendarImporterSettings = {
 	enabledForDailyNotes: true,
-	googleClientId: '',
-	googleClientSecret: '',
-	googleAccessToken: '',
-	googleRefreshToken: '',
+	icsUrl: '',
 	eventFormat: '- {start} - {end}: {title}',
 	allDayFormat: '- All day: {title}',
-	includeTasks: false,
-	taskFormat: '- [ ] {title}',
 }
 
 export default class GoogleCalendarImporter extends Plugin {
@@ -34,6 +23,7 @@ export default class GoogleCalendarImporter extends Plugin {
 
 	async onload() {
 		await this.loadSettings();
+
 		this.registerEvent(
 			this.app.workspace.on('file-open', async (file) => {
 				if (file && this.settings.enabledForDailyNotes && this.isDailyNote(file)) {
@@ -82,8 +72,8 @@ export default class GoogleCalendarImporter extends Plugin {
 		});
 
 		this.registerMarkdownCodeBlockProcessor(
-			"google-calendar", // for already-exist check
-			createCodeBlockProcessor(this.googleCalendarAPI)
+			"google-calendar",
+			createCodeBlockProcessor(() => this.googleCalendarAPI)
 		);
 
 		this.addSettingTab(new GoogleCalendarSettingTab(this.app, this));
@@ -97,63 +87,19 @@ export default class GoogleCalendarImporter extends Plugin {
 
 	async loadSettings() {
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
-		this.initializeGoogleCalendarAPI(); // TODO: reload authenticate info real time rather than after loadSettings.
+		this.initializeGoogleCalendarAPI();
 	}
 
 	private initializeGoogleCalendarAPI() {
 		const credentials: GoogleCalendarCredentials = {
-			clientId: this.settings.googleClientId,
-			clientSecret: this.settings.googleClientSecret,
-			accessToken: this.settings.googleAccessToken,
-			refreshToken: this.settings.googleRefreshToken
+			icsUrl: this.settings.icsUrl,
 		};
-
-		const onTokensUpdated = async (tokens: Credentials) => {
-			if (tokens.access_token) {
-				this.settings.googleAccessToken = tokens.access_token;
-			}
-			if (tokens.refresh_token) {
-				this.settings.googleRefreshToken = tokens.refresh_token;
-			}
-			await this.saveSettings();
-		};
-
-		this.googleCalendarAPI = new GoogleCalendarAPI(credentials, onTokensUpdated);
-	}
-
-	async handleGoogleAuth() {
-		if (!this.settings.googleClientId || !this.settings.googleClientSecret) {
-			new Notice('Please enter your Google Client ID and Client Secret first.');
-			return;
-		}
-
-		new Notice('Opening Google authorization page...');
-		this.initializeGoogleCalendarAPI();
-
-		try {
-			const tokens = await this.googleCalendarAPI.startOAuthFlow();
-			if (tokens.access_token && tokens.refresh_token) {
-				this.settings.googleAccessToken = tokens.access_token;
-				this.settings.googleRefreshToken = tokens.refresh_token || '';
-				await this.saveSettings();
-				this.initializeGoogleCalendarAPI();
-				this.registerMarkdownCodeBlockProcessor(
-					"google-calendar",
-					createCodeBlockProcessor(this.googleCalendarAPI)
-				);
-				new Notice('Google Calendar authorized successfully.');
-			} else {
-				new Notice('Authorization incomplete — no tokens received. Please try again.');
-			}
-		} catch (error) {
-			const message = error instanceof Error ? error.message : 'Unknown error';
-			new Notice(`Google Calendar authorization failed: ${message}`, 10000);
-			console.error('Error during OAuth flow:', error);
-		}
+		this.googleCalendarAPI = new GoogleCalendarAPI(credentials);
 	}
 
 	async saveSettings() {
 		await this.saveData(this.settings);
+		this.initializeGoogleCalendarAPI();
 	}
 
 	isDailyNote(file: TFile): boolean {
@@ -204,24 +150,15 @@ export default class GoogleCalendarImporter extends Plugin {
 			}
 		}
 
-		if (this.settings.includeTasks && data.tasks?.items) {
-			for (const task of data.tasks.items) {
-				if (!task.title) continue;
-				lines.push(this.applyFormat(this.settings.taskFormat, {
-					title: task.title,
-				}));
-			}
-		}
-
 		return lines.join('\n');
 	}
 
 	async insertCalendarAsText(editor: Editor, date: string) {
 		new Notice(`Fetching calendar for ${date}...`);
 		try {
-			const data = await this.googleCalendarAPI.getEventsAndTasksForDate(date);
+			const data = await this.googleCalendarAPI.getCalendarDataForDate(date);
 			if (!data) {
-				new Notice('Failed to fetch calendar data. Check your credentials.');
+				new Notice('Failed to fetch calendar data. Check your iCal URL.');
 				return;
 			}
 			const text = this.formatCalendarData(data);
@@ -251,13 +188,19 @@ export default class GoogleCalendarImporter extends Plugin {
   "date": "${displayDate}",
   "refreshInterval": 60,
   "showEvents": true,
-  "showTasks": true,
   "title": "📅 Calendar for ${displayDate}"
 }
 \`\`\``;
 
 		const leaf = this.app.workspace.getActiveViewOfType(MarkdownView);
-		if (leaf && leaf.editor && leaf.file === file) {
+		// Guard against the file-open transition: the active view may not yet be
+		// the note we were notified about (Obsidian is still swapping leaves), and
+		// calling setValue mid-transition can crash its internal view-state update
+		// ("Cannot read properties of undefined (reading 'sourceMode')").
+		if (!leaf || !leaf.editor || leaf.file !== file) {
+			return;
+		}
+		try {
 			const content = leaf.editor.getValue();
 
 			// Check if google-calendar block already exists
@@ -267,6 +210,10 @@ export default class GoogleCalendarImporter extends Plugin {
 
 			leaf.editor.setValue(content + calendarBlock);
 			leaf.editor.setCursor(leaf.editor.lastLine(), 0);
+		} catch {
+			// If the editor isn't ready yet, silently skip — the block will be
+			// inserted on a future open, and throwing here would surface as an
+			// uncaught error in Obsidian's own file-open path.
 		}
 	}
 
@@ -319,63 +266,44 @@ class GoogleCalendarSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				}));
 
-		new Setting(containerEl)
-			.setName('Include tasks')
-			.setDesc('Include Google Tasks in the text output')
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.includeTasks)
-				.onChange(async (value) => {
-					this.plugin.settings.includeTasks = value;
-					await this.plugin.saveSettings();
-				}));
+		containerEl.createEl('h3', {text: 'Google Calendar feed'});
+
+		// Setup instructions for the secret iCal address
+		const setupInstructions = containerEl.createEl('div', { cls: 'google-calendar-setup-instructions' });
+		setupInstructions.createEl('p', {
+			text: 'In Google Calendar on the web, open Settings → the calendar you want to show → Integrate calendar. Copy the "Secret address in iCal format". Paste it below — this plugin is read-only, so the secret URL is all it needs. No Google Cloud project, no OAuth, no client ID.',
+		});
+		setupInstructions.createEl('p', {
+			text: 'The URL is treated as a credential: anyone who has it can read that calendar. Keep it private, and regenerate it in Google Calendar settings if it leaks.',
+			cls: 'google-calendar-setup-note',
+		});
 
 		new Setting(containerEl)
-			.setName('Task format')
-			.setDesc('Template for tasks. Variables: {title}')
+			.setName('Secret iCal address')
+			.setDesc('The "Secret address in iCal format" from Google Calendar → Integrate calendar')
 			.addText(text => text
-				.setPlaceholder('- [ ] {title}')
-				.setValue(this.plugin.settings.taskFormat)
+				.setPlaceholder('https://calendar.google.com/calendar/ical/.../basic.ics')
+				.setValue(this.plugin.settings.icsUrl)
 				.onChange(async (value) => {
-					this.plugin.settings.taskFormat = value;
+					this.plugin.settings.icsUrl = value.trim();
 					await this.plugin.saveSettings();
 				}));
 
-		containerEl.createEl('h3', {text: 'Google Calendar API'});
+		const isConfigured = !!this.plugin.settings.icsUrl;
 
 		new Setting(containerEl)
-			.setName('Google client ID')
-			.setDesc('OAuth 2.0 client ID from Google Cloud console')
-			.addText(text => text
-				.setPlaceholder('Enter your Google client ID')
-				.setValue(this.plugin.settings.googleClientId)
-				.onChange(async (value) => {
-					this.plugin.settings.googleClientId = value;
-					await this.plugin.saveSettings();
-				}));
-
-		new Setting(containerEl)
-			.setName('Google client secret')
-			.setDesc('OAuth 2.0 client secret from Google Cloud Console')
-			.addText(text => text
-				.setPlaceholder('Enter your Google client secret')
-				.setValue(this.plugin.settings.googleClientSecret)
-				.onChange(async (value) => {
-					this.plugin.settings.googleClientSecret = value;
-					await this.plugin.saveSettings();
-				}));
-
-		new Setting(containerEl)
-			.setName('Google authorization')
-			.setDesc('Click to authorize access to your Google Calendar')
-			.addButton(button => button
-				.setButtonText('Authorize Google Calendar')
-				.onClick(async () => {
-					await this.plugin.handleGoogleAuth();
-				}));
-
-		const authStatus = this.plugin.settings.googleAccessToken ? 'Authorized ✓' : 'Not authorized';
-		new Setting(containerEl)
-			.setName('Authorization status')
-			.setDesc(`Current status: ${authStatus}`);
+			.setName('Feed status')
+			.setDesc(isConfigured ? '✓ iCal feed configured' : '✗ Not configured')
+			.then(setting => {
+				setting.descEl.style.color = isConfigured
+					? 'var(--color-green)'
+					: 'var(--text-muted)';
+				setting.descEl.createEl('div', {
+					text: isConfigured
+						? 'Events will load from your Google Calendar the next time a calendar block renders.'
+						: 'Paste your secret iCal address above to start importing events.',
+					cls: 'setting-item-description',
+				});
+			});
 	}
 }

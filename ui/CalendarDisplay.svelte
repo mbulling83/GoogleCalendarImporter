@@ -2,23 +2,22 @@
   import { onMount, onDestroy } from "svelte";
   import type { GoogleCalendarAPI } from "../googleCalendarAPI";
   import type { Query } from "../Injector/Query";
-  export let api: GoogleCalendarAPI;
+  export let getApi: () => GoogleCalendarAPI;
   export let query: Query;
 
   let loading = false;
   let error: string | null = null;
+  let isConfigError = false;
   let events: any[] = [];
-  let tasks: any[] = [];
   let autoRefreshInterval: number | null = null;
 
   // Default values
   $: displayDate = query.date || getTodayString();
   $: refreshInterval = query.refreshInterval ?? 60;
   $: showEvents = query.showEvents ?? true;
-  $: showTasks = query.showTasks ?? true;
   $: title = query.title || `📅 Calendar for ${displayDate}`;
 
-  $: if (api) {
+  $: if (getApi) {
     fetchCalendarData();
   }
 
@@ -43,10 +42,10 @@
 
   function formatTime(dateTimeString: string): string {
     const date = new Date(dateTimeString);
-    return date.toLocaleTimeString('en-US', { 
-      hour: '2-digit', 
+    return date.toLocaleTimeString('en-US', {
+      hour: '2-digit',
       minute: '2-digit',
-      hour12: false 
+      hour12: false
     });
   }
 
@@ -54,37 +53,32 @@
     return event.start?.date && event.end?.date && !event.start?.dateTime && !event.end?.dateTime;
   }
 
-  function formatDate(dateString: string): string {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric'
-    });
-  }
-
   async function fetchCalendarData() {
     if (loading) return;
-    
+
     loading = true;
     error = null;
+    isConfigError = false;
 
     try {
+      const api = getApi();
       if (!api) {
         throw new Error("Google Calendar API not initialized");
       }
-      
-      const calendarData = await api.getEventsAndTasksForDate(displayDate);
+
+      const calendarData = await api.getCalendarDataForDate(displayDate);
       if (!calendarData) {
-        throw new Error("Failed to fetch calendar data. Please check your credentials.");
+        throw new Error("Failed to fetch calendar data. Please check your iCal URL.");
       }
       events = showEvents && calendarData.events ? calendarData.events.items || [] : [];
-      tasks = showTasks && calendarData.tasks ? calendarData.tasks.items || [] : [];
     } catch (err) {
-      //TODO: integrate error handling of API in component to show detail error message
-      error = err instanceof Error ? err.message : "Unknown error occurred";
+      if (err instanceof Error && err.name === 'ConfigurationError') {
+        isConfigError = true;
+        error = 'Add your Google Calendar secret iCal address in Settings → Google Calendar Importer.';
+      } else {
+        error = err instanceof Error ? err.message : "Unknown error occurred";
+      }
       events = [];
-      tasks = [];
     } finally {
       loading = false;
     }
@@ -94,8 +88,8 @@
 <div class="google-calendar-display">
   <div class="calendar-header">
     <h4>{title}</h4>
-    <button 
-      class="refresh-button" 
+    <button
+      class="refresh-button"
       on:click={fetchCalendarData}
       disabled={loading}
       title="Refresh calendar data"
@@ -105,48 +99,39 @@
   </div>
 
   {#if error}
-    <div class="calendar-error">
-      <strong>Error:</strong> {error}
-    </div>
-  {:else if events.length > 0 || tasks.length > 0}
+    {#if isConfigError}
+      <div class="calendar-auth-error">
+        <div class="auth-error-icon">🔗</div>
+        <div class="auth-error-content">
+          <strong>No iCal feed configured</strong>
+          <p>{error}</p>
+        </div>
+      </div>
+    {:else}
+      <div class="calendar-error">
+        <strong>Error:</strong> {error}
+      </div>
+    {/if}
+  {:else if events.length > 0}
     <div class="calendar-content">
-      {#if events.length > 0}
-        <h5>📅 Events</h5>
-        <ul class="events-list">
-          {#each events as event}
-            {#if event.summary && (event.start?.dateTime || event.start?.date)}
-              <li class="event-item">
-                {#if isAllDayEvent(event)}
-                  <strong>All Day</strong>: {event.summary}
-                {:else if event.start?.dateTime && event.end?.dateTime}
-                  <strong>{formatTime(event.start.dateTime)} - {formatTime(event.end.dateTime)}</strong>: {event.summary}
-                {/if}
-              </li>
-            {/if}
-          {/each}
-        </ul>
-      {/if}
-
-      {#if tasks.length > 0}
-        <h5>✅ Tasks</h5>
-        <ul class="tasks-list">
-          {#each tasks as task}
-            {#if task.title}
-              <li class="task-item">
-                <input type="checkbox" disabled /> 
-                {task.title}
-                {#if task.due}
-                  <span class="task-due">(Due: {formatDate(task.due)})</span>
-                {/if}
-              </li>
-            {/if}
-          {/each}
-        </ul>
-      {/if}
+      <h5>📅 Events</h5>
+      <ul class="events-list">
+        {#each events as event}
+          {#if event.summary && (event.start?.dateTime || event.start?.date)}
+            <li class="event-item">
+              {#if isAllDayEvent(event)}
+                <strong>All Day</strong>: {event.summary}
+              {:else if event.start?.dateTime && event.end?.dateTime}
+                <strong>{formatTime(event.start.dateTime)} - {formatTime(event.end.dateTime)}</strong>: {event.summary}
+              {/if}
+            </li>
+          {/if}
+        {/each}
+      </ul>
     </div>
   {:else if !loading}
     <div class="calendar-empty">
-      No events or tasks found for {displayDate}
+      No events found for {displayDate}
     </div>
   {/if}
 
@@ -210,24 +195,14 @@
     font-weight: 600;
   }
 
-  .events-list, .tasks-list {
+  .events-list {
     margin: 0 0 16px 0;
     padding-left: 16px;
   }
 
-  .event-item, .task-item {
+  .event-item {
     margin-bottom: 4px;
     color: var(--text-normal);
-  }
-
-  .task-item input[type="checkbox"] {
-    margin-right: 6px;
-  }
-
-  .task-due {
-    color: var(--text-muted);
-    font-size: 0.9em;
-    margin-left: 8px;
   }
 
   .calendar-error {
@@ -235,6 +210,34 @@
     background: var(--background-modifier-error);
     padding: 8px;
     border-radius: 4px;
+  }
+
+  .calendar-auth-error {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    background: var(--background-modifier-error);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 4px;
+    padding: 10px 12px;
+  }
+
+  .auth-error-icon {
+    font-size: 18px;
+    flex-shrink: 0;
+    line-height: 1.4;
+  }
+
+  .auth-error-content strong {
+    display: block;
+    color: var(--text-error);
+    margin-bottom: 2px;
+  }
+
+  .auth-error-content p {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 0.9em;
   }
 
   .calendar-empty {

@@ -30,10 +30,6 @@ export function parseQuery(raw: string): Query {
     throw new ParsingError("'showEvents' must be a boolean");
   }
 
-  if (obj.showTasks !== undefined && typeof obj.showTasks !== "boolean") {
-    throw new ParsingError("'showTasks' must be a boolean");
-  }
-
   if (obj.title !== undefined && typeof obj.title !== "string") {
     throw new ParsingError("'title' must be a string");
   }

@@ -1,5 +1,38 @@
 /* Google Calendar Importer Plugin Styles */
 
+/* Settings: redirect URI setup instructions */
+.google-calendar-setup-instructions {
+	background: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 6px;
+	padding: 12px 16px;
+	margin-bottom: 16px;
+	font-size: 0.9em;
+	color: var(--text-muted);
+}
+
+.google-calendar-setup-instructions p {
+	margin: 0 0 8px 0;
+}
+
+.google-calendar-redirect-uri {
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 4px;
+	padding: 8px 12px;
+	margin: 8px 0;
+	font-family: var(--font-monospace);
+	font-size: 0.95em;
+	color: var(--text-normal);
+	user-select: all;
+}
+
+.google-calendar-setup-note {
+	font-style: italic;
+	margin: 8px 0 0 0 !important;
+	font-size: 0.85em;
+}
+
 /* Date Input Modal Styles */
 .google-calendar-modal .date-input {
 	width: 100%;
