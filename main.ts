@@ -193,7 +193,14 @@ export default class GoogleCalendarImporter extends Plugin {
 \`\`\``;
 
 		const leaf = this.app.workspace.getActiveViewOfType(MarkdownView);
-		if (leaf && leaf.editor && leaf.file === file) {
+		// Guard against the file-open transition: the active view may not yet be
+		// the note we were notified about (Obsidian is still swapping leaves), and
+		// calling setValue mid-transition can crash its internal view-state update
+		// ("Cannot read properties of undefined (reading 'sourceMode')").
+		if (!leaf || !leaf.editor || leaf.file !== file) {
+			return;
+		}
+		try {
 			const content = leaf.editor.getValue();
 
 			// Check if google-calendar block already exists
@@ -203,6 +210,10 @@ export default class GoogleCalendarImporter extends Plugin {
 
 			leaf.editor.setValue(content + calendarBlock);
 			leaf.editor.setCursor(leaf.editor.lastLine(), 0);
+		} catch {
+			// If the editor isn't ready yet, silently skip — the block will be
+			// inserted on a future open, and throwing here would surface as an
+			// uncaught error in Obsidian's own file-open path.
 		}
 	}
 

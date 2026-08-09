@@ -1,4 +1,4 @@
-import * as ICAL from "ical.js";
+import ICAL from "ical.js";
 import { requestUrl } from "obsidian";
 
 /**

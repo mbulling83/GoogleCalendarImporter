@@ -1,9 +1,9 @@
 declare module "ical.js" {
-	// ical.js is used for parsing only; we touch a small, stable subset of its
-	// API surface. Keep this loose to avoid coupling the build to its types.
-	export function parse(input: string): any;
-	export class Component {
-		constructor(jCal: any);
+	// ical.js ships a CJS module whose default export is the ICAL namespace
+	// object. We import it as a default so esbuild does not tree-shake the
+	// named members to `undefined` (which is what happens with
+	// `import * as ICAL` for this particular CJS build).
+	export interface Component {
 		getAllSubcomponents(kind: string): any[];
 	}
 	export class Event {
@@ -12,7 +12,6 @@ declare module "ical.js" {
 		summary: string;
 		location?: string;
 		description?: string;
-		status?: string;
 		recurrenceId: any | null;
 		startDate: any;
 		endDate: any;
@@ -24,6 +23,9 @@ declare module "ical.js" {
 			endDate: any;
 			item: any;
 		};
+		readonly component: {
+			getFirstPropertyValue(name: string): any;
+		};
 	}
 	export class Time {
 		static fromJSDate(date: Date, useUTC?: boolean): Time;
@@ -32,4 +34,11 @@ declare module "ical.js" {
 		toString(): string;
 		isDate: boolean;
 	}
+	const ICAL: {
+		parse(input: string): any;
+		Component: typeof Component;
+		Event: typeof Event;
+		Time: typeof Time;
+	};
+	export default ICAL;
 }
