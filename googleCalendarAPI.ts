@@ -1,4 +1,5 @@
 import * as ICAL from "ical.js";
+import { requestUrl } from "obsidian";
 
 /**
  * Read-only Google Calendar access through the "secret address in iCal format"
@@ -80,11 +81,18 @@ export class GoogleCalendarAPI {
 			return this.cache.text;
 		}
 
-		const res = await fetch(this.credentials.icsUrl, { method: "GET" });
-		if (!res.ok) {
-			throw new Error(`HTTP ${res.status} ${res.statusText}`);
+		// Obsidian's requestUrl routes through the main process, so it is not bound
+		// by the renderer's CORS policy. The renderer's own fetch() is blocked by
+		// Google's calendar server, which sends no Access-Control-Allow-Origin
+		// header (app://obsidian.md is not a web origin it will allow).
+		const res = await requestUrl({
+			url: this.credentials.icsUrl,
+			method: "GET",
+		});
+		if (res.status >= 400) {
+			throw new Error(`HTTP ${res.status}`);
 		}
-		const text = await res.text();
+		const text = res.text;
 		this.cache = { url: this.credentials.icsUrl, text, at: now };
 		return text;
 	}
