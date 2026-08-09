@@ -1,25 +1,18 @@
 import { App, Editor, Notice, Plugin, PluginSettingTab, Setting, TFile, MarkdownView, moment } from 'obsidian';
 import { GoogleCalendarAPI, GoogleCalendarCredentials, CalendarData } from './googleCalendarAPI';
-import { Credentials } from "google-auth-library";
 import { createCodeBlockProcessor } from './codeBlockProcessor';
 import { DateInputModal } from './dateInputModal';
 
 interface GoogleCalendarImporterSettings {
 	enabledForDailyNotes: boolean;
-	googleClientId: string;
-	googleClientSecret: string;
-	googleAccessToken: string;
-	googleRefreshToken: string;
+	icsUrl: string;
 	eventFormat: string;
 	allDayFormat: string;
 }
 
 const DEFAULT_SETTINGS: GoogleCalendarImporterSettings = {
 	enabledForDailyNotes: true,
-	googleClientId: '',
-	googleClientSecret: '',
-	googleAccessToken: '',
-	googleRefreshToken: '',
+	icsUrl: '',
 	eventFormat: '- {start} - {end}: {title}',
 	allDayFormat: '- All day: {title}',
 }
@@ -94,75 +87,19 @@ export default class GoogleCalendarImporter extends Plugin {
 
 	async loadSettings() {
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
-		this.initializeGoogleCalendarAPI(); // TODO: reload authenticate info real time rather than after loadSettings.
+		this.initializeGoogleCalendarAPI();
 	}
 
 	private initializeGoogleCalendarAPI() {
 		const credentials: GoogleCalendarCredentials = {
-			clientId: this.settings.googleClientId,
-			clientSecret: this.settings.googleClientSecret,
-			accessToken: this.settings.googleAccessToken,
-			refreshToken: this.settings.googleRefreshToken
+			icsUrl: this.settings.icsUrl,
 		};
-
-		const onTokensUpdated = async (tokens: Credentials) => {
-			if (tokens.access_token) {
-				this.settings.googleAccessToken = tokens.access_token;
-			}
-			if (tokens.refresh_token) {
-				this.settings.googleRefreshToken = tokens.refresh_token;
-			}
-			await this.saveSettings();
-		};
-
-		this.googleCalendarAPI = new GoogleCalendarAPI(credentials, onTokensUpdated);
-	}
-
-	async handleGoogleAuth() {
-		if (!this.settings.googleClientId || !this.settings.googleClientSecret) {
-			new Notice('Please enter your Google Client ID and Client Secret first.');
-			return;
-		}
-
-		// Clear any existing tokens so the OAuth flow starts fresh
-		this.settings.googleAccessToken = '';
-		this.settings.googleRefreshToken = '';
-		this.initializeGoogleCalendarAPI();
-
-		new Notice('Opening Google authorization page...');
-
-		try {
-			// Use the local loopback redirect flow (oauthServer.ts). Google's OAuth 2.0
-			// policy permits http://localhost redirects for Desktop-app clients, but not
-			// custom URI schemes like obsidian://.
-			const tokens = await this.googleCalendarAPI.startOAuthFlow();
-
-			if (tokens.access_token && tokens.refresh_token) {
-				this.settings.googleAccessToken = tokens.access_token;
-				this.settings.googleRefreshToken = tokens.refresh_token;
-				await this.saveSettings();
-				this.initializeGoogleCalendarAPI();
-				new Notice('Google Calendar authorized successfully.');
-			} else {
-				new Notice('Authorization incomplete — no tokens received. Please try again.');
-			}
-		} catch (error) {
-			const message = error instanceof Error ? error.message : 'Unknown error';
-			new Notice(`Google Calendar authorization failed: ${message}`, 10000);
-			console.error('Error during OAuth flow:', error);
-		}
-	}
-
-	async logout() {
-		this.settings.googleAccessToken = '';
-		this.settings.googleRefreshToken = '';
-		await this.saveSettings();
-		this.initializeGoogleCalendarAPI();
-		new Notice('Signed out of Google Calendar.');
+		this.googleCalendarAPI = new GoogleCalendarAPI(credentials);
 	}
 
 	async saveSettings() {
 		await this.saveData(this.settings);
+		this.initializeGoogleCalendarAPI();
 	}
 
 	isDailyNote(file: TFile): boolean {
@@ -221,7 +158,7 @@ export default class GoogleCalendarImporter extends Plugin {
 		try {
 			const data = await this.googleCalendarAPI.getCalendarDataForDate(date);
 			if (!data) {
-				new Notice('Failed to fetch calendar data. Check your credentials.');
+				new Notice('Failed to fetch calendar data. Check your iCal URL.');
 				return;
 			}
 			const text = this.formatCalendarData(data);
@@ -318,82 +255,44 @@ class GoogleCalendarSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				}));
 
-		containerEl.createEl('h3', {text: 'Google Calendar API'});
+		containerEl.createEl('h3', {text: 'Google Calendar feed'});
 
-		// OAuth client setup instructions
+		// Setup instructions for the secret iCal address
 		const setupInstructions = containerEl.createEl('div', { cls: 'google-calendar-setup-instructions' });
 		setupInstructions.createEl('p', {
-			text: 'In Google Cloud Console (APIs & Services → Credentials), create an OAuth 2.0 Client ID of type "Desktop app". Desktop-app clients allow the local loopback redirect this plugin uses — no redirect URI needs to be registered manually.',
+			text: 'In Google Calendar on the web, open Settings → the calendar you want to show → Integrate calendar. Copy the "Secret address in iCal format". Paste it below — this plugin is read-only, so the secret URL is all it needs. No Google Cloud project, no OAuth, no client ID.',
 		});
 		setupInstructions.createEl('p', {
-			text: 'Make sure the project\'s OAuth consent screen is your own and that your Google account is added as a Test user. Then paste that client\'s ID and secret below.',
+			text: 'The URL is treated as a credential: anyone who has it can read that calendar. Keep it private, and regenerate it in Google Calendar settings if it leaks.',
 			cls: 'google-calendar-setup-note',
 		});
 
 		new Setting(containerEl)
-			.setName('Google client ID')
-			.setDesc('OAuth 2.0 client ID from Google Cloud console')
+			.setName('Secret iCal address')
+			.setDesc('The "Secret address in iCal format" from Google Calendar → Integrate calendar')
 			.addText(text => text
-				.setPlaceholder('Enter your Google client ID')
-				.setValue(this.plugin.settings.googleClientId)
+				.setPlaceholder('https://calendar.google.com/calendar/ical/.../basic.ics')
+				.setValue(this.plugin.settings.icsUrl)
 				.onChange(async (value) => {
-					this.plugin.settings.googleClientId = value;
+					this.plugin.settings.icsUrl = value.trim();
 					await this.plugin.saveSettings();
 				}));
 
-		new Setting(containerEl)
-			.setName('Google client secret')
-			.setDesc('OAuth 2.0 client secret from Google Cloud Console')
-			.addText(text => text
-				.setPlaceholder('Enter your Google client secret')
-				.setValue(this.plugin.settings.googleClientSecret)
-				.onChange(async (value) => {
-					this.plugin.settings.googleClientSecret = value;
-					await this.plugin.saveSettings();
-				}));
-
-		const isAuthorized = !!(this.plugin.settings.googleAccessToken && this.plugin.settings.googleRefreshToken);
-
-		const authStatusDesc = isAuthorized
-			? 'Your Google Calendar account is connected.'
-			: 'Not connected. Enter your Client ID and Secret above, then click Authorize.';
+		const isConfigured = !!this.plugin.settings.icsUrl;
 
 		new Setting(containerEl)
-			.setName('Authorization status')
-			.setDesc(isAuthorized ? '✓ Authorized' : '✗ Not authorized')
+			.setName('Feed status')
+			.setDesc(isConfigured ? '✓ iCal feed configured' : '✗ Not configured')
 			.then(setting => {
-				setting.descEl.style.color = isAuthorized
+				setting.descEl.style.color = isConfigured
 					? 'var(--color-green)'
 					: 'var(--text-muted)';
-				setting.descEl.createEl('div', { text: authStatusDesc, cls: 'setting-item-description' });
+				setting.descEl.createEl('div', {
+					text: isConfigured
+						? 'Events will load from your Google Calendar the next time a calendar block renders.'
+						: 'Paste your secret iCal address above to start importing events.',
+					cls: 'setting-item-description',
+				});
 			});
-
-		new Setting(containerEl)
-			.setName(isAuthorized ? 'Re-authorize' : 'Authorize Google Calendar')
-			.setDesc(isAuthorized
-				? 'Re-connect your Google account (e.g. if authorization has expired)'
-				: 'Connect your Google Calendar account')
-			.addButton(button => {
-				button
-					.setButtonText(isAuthorized ? 'Re-authorize' : 'Authorize')
-					.onClick(async () => {
-						await this.plugin.handleGoogleAuth();
-						this.display();
-					});
-				if (!isAuthorized) button.setCta();
-			});
-
-		if (isAuthorized) {
-			new Setting(containerEl)
-				.setName('Sign out')
-				.setDesc('Disconnect your Google Calendar account and clear stored tokens')
-				.addButton(button => button
-					.setButtonText('Sign out')
-					.setWarning()
-					.onClick(async () => {
-						await this.plugin.logout();
-						this.display();
-					}));
-		}
 	}
 }

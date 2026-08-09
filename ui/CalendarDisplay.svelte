@@ -7,7 +7,7 @@
 
   let loading = false;
   let error: string | null = null;
-  let isAuthError = false;
+  let isConfigError = false;
   let events: any[] = [];
   let autoRefreshInterval: number | null = null;
 
@@ -58,7 +58,7 @@
 
     loading = true;
     error = null;
-    isAuthError = false;
+    isConfigError = false;
 
     try {
       const api = getApi();
@@ -68,13 +68,13 @@
 
       const calendarData = await api.getCalendarDataForDate(displayDate);
       if (!calendarData) {
-        throw new Error("Failed to fetch calendar data. Please check your credentials.");
+        throw new Error("Failed to fetch calendar data. Please check your iCal URL.");
       }
       events = showEvents && calendarData.events ? calendarData.events.items || [] : [];
     } catch (err) {
-      if (err instanceof Error && err.name === 'AuthenticationError') {
-        isAuthError = true;
-        error = 'Go to Settings → Google Calendar Importer and click Re-authorize.';
+      if (err instanceof Error && err.name === 'ConfigurationError') {
+        isConfigError = true;
+        error = 'Add your Google Calendar secret iCal address in Settings → Google Calendar Importer.';
       } else {
         error = err instanceof Error ? err.message : "Unknown error occurred";
       }
@@ -99,11 +99,11 @@
   </div>
 
   {#if error}
-    {#if isAuthError}
+    {#if isConfigError}
       <div class="calendar-auth-error">
-        <div class="auth-error-icon">🔑</div>
+        <div class="auth-error-icon">🔗</div>
         <div class="auth-error-content">
-          <strong>Authorization expired</strong>
+          <strong>No iCal feed configured</strong>
           <p>{error}</p>
         </div>
       </div>

@@ -12,36 +12,34 @@ A simple and light-weighted google calendar importer, allow injecting the events
 
 - 🎯 **Date-Specific Imports**: Choose any date to import events for that specific day
 - 🔄 **Live Calendar Blocks**: Uses markdown code blocks as configuration that render your calendar events as you want
-- 🔐 **Secure OAuth Integration**: Secure authentication with Google Calendar using OAuth 2.0
+- 🔐 **No OAuth**: Uses Google Calendar's read-only "secret address in iCal format" — no Google Cloud project, no client ID, no token refresh.
 
 ## Requirements
 
 - Obsidian v0.15.0 or later
 - Desktop version of Obsidian (plugin is desktop-only)
-- Google Calendar account
-- Google Cloud Project with Calendar API enabled
+- A Google Calendar and its secret iCal address (Settings → Integrate calendar)
 
 ## Setup
 
-### 1. Google Cloud Console Setup
+This plugin reads your calendar through Google's **secret address in iCal format** — a read-only URL Google publishes per calendar. No Google Cloud project, no OAuth consent screen, no client ID or secret.
 
-1. Go to [Google Cloud Console](https://console.cloud.google.com/)
-2. Create a new project or select an existing one
-3. Enable the Google Calendar API and task API
-4. Create OAuth 2.0 credentials 
-5. Add yourself as test account
-6. Note down your Client ID and Client Secret
+### 1. Get your secret iCal address
 
-TODO: add detail explanation with screenshot
+1. Open [Google Calendar](https://calendar.google.com/) on the web
+2. Go to **Settings** → select the calendar you want to show
+3. Scroll to **Integrate calendar** and copy the **Secret address in iCal format** (it ends in `/basic.ics`)
+
+The URL is a credential: anyone who has it can read that calendar, so keep it private. Regenerate it in Google Calendar settings if it ever leaks.
 
 ### 2. Plugin Configuration
 
-1. Open Obsidian Settings
-2. Navigate to Community Plugins → Google Calendar Importer
-3. Enter your Google Client ID and Client Secret
-4. Click "Authenticate with Google" to complete the OAuth flow
-5. Configure your preferences:
-   - **Enable for Daily Notes**: Automatically add calendar blocks when opening daily notes
+1. Open Obsidian Settings → Community Plugins → **Google Calendar Importer**
+2. Paste the secret iCal address into **Secret iCal address**
+3. Toggle **Enable for Daily Notes** to auto-insert calendar blocks when opening daily notes
+4. Adjust the timed / all-day event format templates if you like
+
+Events load the next time a calendar block renders.
 
 
 ## Installation
@@ -100,31 +98,24 @@ npm run build
 ### Code Structure
 
 - `main.ts` - Main plugin class and core functionality
-- `googleCalendarAPI.ts` - Google Calendar API integration
+- `googleCalendarAPI.ts` - iCal feed fetching and parsing (recurring + override expansion) via `ical.js`
 - `codeBlockProcessor.ts` - Markdown code block processor for rendering
 - `dateInputModal.ts` - Modal for selecting dates
-- `oauthServer.ts` - OAuth authentication server
 
 ## Privacy & Security
 
-- All authentication is handled through Google's official OAuth 2.0 flow
-- No calendar data is stored permanently; it's fetched on-demand
-- Access tokens are stored locally in Obsidian's plugin data
-- The plugin only requests read access to your calendar events
+- The plugin reads your calendar through Google's read-only secret iCal URL
+- No OAuth tokens are stored; the URL itself is the only credential, kept in Obsidian's plugin data
+- Calendar data is fetched on demand and cached in memory for ~30 seconds
+- The plugin cannot write to your calendar — the iCal feed is read-only by design
 
 ## Troubleshooting
 
-### Authentication Issues
-
-- Ensure your Google Cloud Project has the Calendar and Task API enabled
-- Verify your Client ID and Client Secret are entered correctly
-- Make sure your OAuth consent screen is properly configured
-
 ### Calendar Not Loading
 
-- Check if you have internet connectivity
-- Verify your Google account has access to the calendars you want to import
-- Try re-authenticating by clearing the stored tokens in plugin settings
+- Check the secret iCal address is pasted correctly (it must end in `/basic.ics`)
+- Verify you copied the *secret address in iCal format*, not the public one
+- Regenerate the address in Google Calendar settings if it stops working
 
 ## Contributing
 
@@ -149,6 +140,12 @@ If you find this plugin useful, consider supporting the development:
 - 💡 Suggest new features
 
 ## Changelog
+
+### v1.2.0
+- **Replaced OAuth with Google Calendar's read-only secret iCal address.**
+- No Google Cloud project, client ID/secret, or token refresh required.
+- Removed Google Tasks (the iCal feed carries events only).
+- Recurring events and one-off overrides (moved / cancelled instances) are now expanded locally with `ical.js`.
 
 ### v1.0.0
 - Initial release
