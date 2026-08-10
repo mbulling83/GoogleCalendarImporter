@@ -12,7 +12,7 @@ export class DateInputModal extends Modal {
 	onOpen() {
 		const { contentEl } = this;
 		contentEl.addClass('google-calendar-modal');
-		contentEl.createEl('h2', { text: 'Insert Google Calendar block' });
+		contentEl.createEl('h2', { text: 'Insert calendar events as text' });
 
 		const inputContainer = contentEl.createDiv();
 		inputContainer.createEl('label', { text: 'Date' });

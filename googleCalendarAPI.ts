@@ -37,7 +37,7 @@ export interface CalendarData {
 /** Override occurrences that land this far outside the queried day are still
  *  caught, so a meeting moved onto/off of the target day shows correctly. */
 const EXPANSION_PADDING_DAYS = 7;
-/** Short-lived in-memory cache so the auto-refresh timer does not hammer Google. */
+/** Short-lived in-memory cache so repeated imports do not hammer Google. */
 const CACHE_TTL_MS = 30_000;
 
 export class GoogleCalendarAPI {
@@ -65,10 +65,6 @@ export class GoogleCalendarAPI {
 			console.error("ICS calendar fetch/parse error:", error);
 			throw new Error(`Failed to load calendar: ${message}`);
 		}
-	}
-
-	cleanup(): void {
-		// Nothing to tear down — no server, no token refresh loop.
 	}
 
 	private async fetchICS(): Promise<string> {
@@ -187,8 +183,8 @@ export class GoogleCalendarAPI {
 		return ev.component?.getFirstPropertyValue?.("status") ?? null;
 	}
 
-	/** Normalise an ical.js Event (or a generated occurrence) into the
-	 *  `{ summary, start, end }` shape the renderer already expects. */
+	/** Normalise an ical.js Event (or a generated occurrence) into a plain
+	 *  `{ summary, start, end }` shape for formatting. */
 	private eventFromTimes(
 		ev: any,
 		start?: any,

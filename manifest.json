@@ -1,9 +1,9 @@
 {
 	"id": "google-calendar-importer",
 	"name": "Google Calendar Importer",
-	"version": "1.2.0",
+	"version": "1.3.0",
 	"minAppVersion": "0.15.0",
-	"description": "A simple, light-weighted, read-only Google Calendar importer. Uses the secret iCal address — no OAuth, no Google Cloud project. Injects a day's events into daily notes or anywhere via a command.",
+	"description": "A simple, light-weighted, read-only Google Calendar importer. Uses the secret iCal address — no OAuth, no Google Cloud project. Inserts a day's events into a note as plain text via a command.",
 	"author": "lexafaxine",
 	"authorUrl": "https://github.com/lexafaxine",
 	"isDesktopOnly": true

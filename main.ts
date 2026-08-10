@@ -1,17 +1,14 @@
 import { App, Editor, Notice, Plugin, PluginSettingTab, Setting, TFile, MarkdownView, moment } from 'obsidian';
 import { GoogleCalendarAPI, GoogleCalendarCredentials, CalendarData } from './googleCalendarAPI';
-import { createCodeBlockProcessor } from './codeBlockProcessor';
 import { DateInputModal } from './dateInputModal';
 
 interface GoogleCalendarImporterSettings {
-	enabledForDailyNotes: boolean;
 	icsUrl: string;
 	eventFormat: string;
 	allDayFormat: string;
 }
 
 const DEFAULT_SETTINGS: GoogleCalendarImporterSettings = {
-	enabledForDailyNotes: true,
 	icsUrl: '',
 	eventFormat: '- {start} - {end}: {title}',
 	allDayFormat: '- All day: {title}',
@@ -24,42 +21,13 @@ export default class GoogleCalendarImporter extends Plugin {
 	async onload() {
 		await this.loadSettings();
 
-		this.registerEvent(
-			this.app.workspace.on('file-open', async (file) => {
-				if (file && this.settings.enabledForDailyNotes && this.isDailyNote(file)) {
-					// Wait for the view to switch to the new file before inserting
-					setTimeout(async () => {
-						await this.insertCalendarBlock(file);
-					}, 100);
-				}
-			})
-		);
-
-		this.addCommand({
-			id: 'insert-google-calendar-block',
-			name: 'Insert Google Calendar block',
-			editorCheckCallback: (checking, editor, ctx) => {
-				if (ctx instanceof MarkdownView && ctx.file) {
-					if (!checking) {
-						const file = ctx.file;
-						new DateInputModal(this.app, (date: string) => {
-							this.insertCalendarBlock(file, date, true);
-						}).open();
-					}
-					return true;
-				}
-				return false;
-			}
-		});
-
 		this.addCommand({
 			id: 'insert-calendar-events-as-text',
 			name: 'Insert calendar events as text',
 			editorCheckCallback: (checking, editor, ctx) => {
 				if (ctx instanceof MarkdownView && ctx.file) {
 					if (!checking) {
-						const file = ctx.file;
-						const dateFromFile = this.extractDateFromFilename(file);
+						const dateFromFile = this.extractDateFromFilename(ctx.file);
 						new DateInputModal(this.app, (date: string) => {
 							const targetDate = date || dateFromFile || moment().format('YYYY-MM-DD');
 							this.insertCalendarAsText(editor, targetDate);
@@ -71,18 +39,7 @@ export default class GoogleCalendarImporter extends Plugin {
 			}
 		});
 
-		this.registerMarkdownCodeBlockProcessor(
-			"google-calendar",
-			createCodeBlockProcessor(() => this.googleCalendarAPI)
-		);
-
 		this.addSettingTab(new GoogleCalendarSettingTab(this.app, this));
-	}
-
-	onunload() {
-		if (this.googleCalendarAPI) {
-			this.googleCalendarAPI.cleanup();
-		}
 	}
 
 	async loadSettings() {
@@ -100,11 +57,6 @@ export default class GoogleCalendarImporter extends Plugin {
 	async saveSettings() {
 		await this.saveData(this.settings);
 		this.initializeGoogleCalendarAPI();
-	}
-
-	isDailyNote(file: TFile): boolean {
-		const dailyNotesFormat = /\d{4}-\d{2}-\d{2}/;
-		return dailyNotesFormat.test(file.basename);
 	}
 
 	private extractDateFromFilename(file: TFile): string {
@@ -173,50 +125,6 @@ export default class GoogleCalendarImporter extends Plugin {
 			new Notice(`Failed to fetch calendar: ${message}`, 10000);
 		}
 	}
-
-	async insertCalendarBlock(file: TFile, customDate?: string, isFromCommand?: boolean) {
-		const todayDate = moment().format('YYYY-MM-DD');
-
-		const dateString = isFromCommand
-			? (customDate || todayDate)
-			: (customDate || this.extractDateFromFilename(file) || todayDate);
-		const displayDate = dateString;
-
-		const calendarBlock = `
-\`\`\`google-calendar
-{
-  "date": "${displayDate}",
-  "refreshInterval": 60,
-  "showEvents": true,
-  "title": "📅 Calendar for ${displayDate}"
-}
-\`\`\``;
-
-		const leaf = this.app.workspace.getActiveViewOfType(MarkdownView);
-		// Guard against the file-open transition: the active view may not yet be
-		// the note we were notified about (Obsidian is still swapping leaves), and
-		// calling setValue mid-transition can crash its internal view-state update
-		// ("Cannot read properties of undefined (reading 'sourceMode')").
-		if (!leaf || !leaf.editor || leaf.file !== file) {
-			return;
-		}
-		try {
-			const content = leaf.editor.getValue();
-
-			// Check if google-calendar block already exists
-			if (content.includes('```google-calendar') && !isFromCommand) {
-				return; // Don't insert duplicate blocks
-			}
-
-			leaf.editor.setValue(content + calendarBlock);
-			leaf.editor.setCursor(leaf.editor.lastLine(), 0);
-		} catch {
-			// If the editor isn't ready yet, silently skip — the block will be
-			// inserted on a future open, and throwing here would surface as an
-			// uncaught error in Obsidian's own file-open path.
-		}
-	}
-
 }
 
 class GoogleCalendarSettingTab extends PluginSettingTab {
@@ -231,16 +139,6 @@ class GoogleCalendarSettingTab extends PluginSettingTab {
 		const {containerEl} = this;
 
 		containerEl.empty();
-
-		new Setting(containerEl)
-			.setName('Enable for daily notes')
-			.setDesc('Automatically insert calendar block when opening daily notes')
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.enabledForDailyNotes)
-				.onChange(async (value) => {
-					this.plugin.settings.enabledForDailyNotes = value;
-					await this.plugin.saveSettings();
-				}));
 
 		containerEl.createEl('h3', {text: 'Event format'});
 
@@ -300,7 +198,7 @@ class GoogleCalendarSettingTab extends PluginSettingTab {
 					: 'var(--text-muted)';
 				setting.descEl.createEl('div', {
 					text: isConfigured
-						? 'Events will load from your Google Calendar the next time a calendar block renders.'
+						? 'Run the "Insert calendar events as text" command to import a day\'s events.'
 						: 'Paste your secret iCal address above to start importing events.',
 					cls: 'setting-item-description',
 				});

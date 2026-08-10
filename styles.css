@@ -1,6 +1,6 @@
 /* Google Calendar Importer Plugin Styles */
 
-/* Settings: redirect URI setup instructions */
+/* Settings: secret iCal address setup instructions */
 .google-calendar-setup-instructions {
 	background: var(--background-secondary);
 	border: 1px solid var(--background-modifier-border);
@@ -13,18 +13,6 @@
 
 .google-calendar-setup-instructions p {
 	margin: 0 0 8px 0;
-}
-
-.google-calendar-redirect-uri {
-	background: var(--background-primary);
-	border: 1px solid var(--background-modifier-border);
-	border-radius: 4px;
-	padding: 8px 12px;
-	margin: 8px 0;
-	font-family: var(--font-monospace);
-	font-size: 0.95em;
-	color: var(--text-normal);
-	user-select: all;
 }
 
 .google-calendar-setup-note {
@@ -42,8 +30,4 @@
 .google-calendar-modal .button-container {
 	margin-top: 20px;
 	text-align: right;
-}
-
-.google-calendar-modal .cancel-button {
-	margin-right: 10px;
 }

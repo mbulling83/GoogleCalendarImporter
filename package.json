@@ -1,7 +1,7 @@
 {
 	"name": "google-calendar-importer",
-	"version": "1.2.0",
-	"description": "A simple and light-weighted google calendar importer, allow injecting the events / tasks of a day automatically to your daily notes, or import it to anywhere with a command.",
+	"version": "1.3.0",
+	"description": "A simple, light-weighted, read-only Google Calendar importer. Inserts a day's events as plain text via a command, using the secret iCal address.",
 	"main": "main.js",
 	"scripts": {
 		"dev": "node esbuild.config.mjs",
@@ -12,20 +12,15 @@
 	"author": "",
 	"license": "MIT",
 	"dependencies": {
-		"ical.js": "^2.1.0",
-		"yaml": "^2.2.1"
+		"ical.js": "^2.1.0"
 	},
 	"devDependencies": {
-		"@tsconfig/svelte": "^3.0.0",
 		"@types/node": "^16.11.6",
 		"@typescript-eslint/eslint-plugin": "5.29.0",
 		"@typescript-eslint/parser": "5.29.0",
 		"builtin-modules": "3.3.0",
 		"esbuild": "0.17.3",
-		"esbuild-svelte": "^0.7.3",
 		"obsidian": "latest",
-		"svelte": "^3.57.0",
-		"svelte-preprocess": "^5.0.3",
 		"tslib": "2.4.0",
 		"typescript": "4.7.4"
 	}

@@ -1,17 +1,12 @@
 # Google Calendar Importer
 
-A simple and light-weighted google calendar importer, allow injecting the events / tasks of a day automatically to your daily notes, or import it to anywhere with a command.
+A simple, light-weighted, read-only Google Calendar importer. Inserts a day's events into any note as plain markdown text with a single command.
 
 ## Features
 
-- 🗓️ **Automatic Daily Notes Integration**: Automatically inject calendar events when opening daily notes
-![auto-ezgif com-video-to-gif-converter](https://github.com/user-attachments/assets/a921e481-df5f-47ab-abc6-3f5ced347e40)
-
-- 📝 **Manual Import Command**: Insert calendar blocks anywhere in your notes with a simple command
-  ![command-ezgif com-video-to-gif-converter](https://github.com/user-attachments/assets/33cffa31-51cb-4518-ab88-559549c6cf74)
-
-- 🎯 **Date-Specific Imports**: Choose any date to import events for that specific day
-- 🔄 **Live Calendar Blocks**: Uses markdown code blocks as configuration that render your calendar events as you want
+- 📝 **Insert as Text**: The **Insert calendar events as text** command writes the day's events into your note as plain markdown — no live blocks, no embedded widgets, nothing to re-render.
+- 🎯 **Date-Specific Imports**: Pick any date; the date is pre-filled from the note's filename (e.g. `2026-08-10`) when there is one, and defaults to today.
+- 🎨 **Custom Formats**: Configurable templates for timed and all-day events.
 - 🔐 **No OAuth**: Uses Google Calendar's read-only "secret address in iCal format" — no Google Cloud project, no client ID, no token refresh.
 
 ## Requirements
@@ -36,10 +31,21 @@ The URL is a credential: anyone who has it can read that calendar, so keep it pr
 
 1. Open Obsidian Settings → Community Plugins → **Google Calendar Importer**
 2. Paste the secret iCal address into **Secret iCal address**
-3. Toggle **Enable for Daily Notes** to auto-insert calendar blocks when opening daily notes
-4. Adjust the timed / all-day event format templates if you like
+3. Adjust the timed / all-day event format templates if you like
 
-Events load the next time a calendar block renders.
+## Usage
+
+Open a note, place the cursor where you want the events, and run **Insert calendar events as text** from the command palette. Enter a date (`YYYY-MM-DD`) or leave it empty to use the date in the filename, falling back to today.
+
+### Format templates
+
+| Variable | Meaning |
+|---|---|
+| `{title}` | Event summary |
+| `{start}` / `{end}` | 24-hour time (e.g. `09:30`) |
+| `{start12}` / `{end12}` | 12-hour time (e.g. `9:30 AM`) |
+
+Defaults: `- {start} - {end}: {title}` for timed events, `- All day: {title}` for all-day events.
 
 
 ## Installation
@@ -99,7 +105,6 @@ npm run build
 
 - `main.ts` - Main plugin class and core functionality
 - `googleCalendarAPI.ts` - iCal feed fetching and parsing (recurring + override expansion) via `ical.js`
-- `codeBlockProcessor.ts` - Markdown code block processor for rendering
 - `dateInputModal.ts` - Modal for selecting dates
 
 ## Privacy & Security
@@ -111,7 +116,7 @@ npm run build
 
 ## Troubleshooting
 
-### Calendar Not Loading
+### No Events Inserted
 
 - Check the secret iCal address is pasted correctly (it must end in `/basic.ics`)
 - Verify you copied the *secret address in iCal format*, not the public one
@@ -140,6 +145,11 @@ If you find this plugin useful, consider supporting the development:
 - 💡 Suggest new features
 
 ## Changelog
+
+### v1.3.0
+- **Stripped back to the single "insert as text" command.**
+- Removed live `google-calendar` code blocks, the Svelte renderer, and automatic daily-note injection.
+- Existing ```` ```google-calendar ```` blocks in old notes now render as inert code blocks.
 
 ### v1.2.0
 - **Replaced OAuth with Google Calendar's read-only secret iCal address.**
